@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from src.server import serve as _serve
+from .server import serve as _serve
 
 app = typer.Typer()
 

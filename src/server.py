@@ -4,10 +4,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from src.proxydhcp import _proxydhcp_listener
-from src.tftp import _tftp_listener
-from src.http_server import _http_server
-from src.boot_config import generate_boot_config
+from .proxydhcp import _proxydhcp_listener
+from .tftp import _tftp_listener
+from .http_server import _http_server
+from .boot_config import generate_boot_config
 
 
 def serve(
