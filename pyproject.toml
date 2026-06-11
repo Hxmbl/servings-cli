@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "servings-termux"
+name = "servings"
 version = "0.1.0"
 description = "Run a PXE/Boot server directly from your phone. No need for a USB."
 requires-python = ">=3.12"

@@ -1,4 +1,4 @@
-# servings-termux
+# servings
 
 Run a full PXE/Boot server directly from your phone. No need for a USB.
 

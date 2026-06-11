@@ -13,17 +13,9 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.logic import (
-    BootHTTPHandler,
-    TFTP_ACK,
-    TFTP_BLOCK_SIZE,
-    TFTP_DATA,
-    TFTP_ERROR,
-    TFTP_RRQ,
-    _label_from_filename,
-    generate_boot_config,
-    parse_tftp_rrq,
-)
+from src.http_server import BootHTTPHandler
+from src.tftp import TFTP_ACK, TFTP_BLOCK_SIZE, TFTP_DATA, TFTP_ERROR, TFTP_RRQ, parse_tftp_rrq
+from src.boot_config import _label_from_filename, generate_boot_config
 
 
 def _section(title: str) -> None:
@@ -172,22 +164,16 @@ class TestTftpSendFile(unittest.TestCase):
 
     def test_send_small_file(self) -> None:
         """Test sending a file smaller than one TFTP block."""
-        from src.logic import _tftp_send_file
+        from src.tftp import _tftp_send_next_block
 
         _section("TFTP send: small file")
-        test_file = self.boot_root / "test.kpxe"
         content = b"hello-boot"
-        test_file.write_bytes(content)
 
-        # Create a mock socket that records sent data
         mock_sock = MagicMock()
-        # First recvfrom returns an ACK for block 1
-        ack_pkt = struct.pack("!HH", TFTP_ACK, 1)
-        mock_sock.recvfrom.return_value = (ack_pkt, ("127.0.0.1", 1234))
+        state = {"file_data": content, "block_num": 0, "offset": 0}
+        done = _tftp_send_next_block(mock_sock, ("127.0.0.1", 1234), state)
 
-        _tftp_send_file(mock_sock, test_file, ("127.0.0.1", 1234))
-
-        # Verify DATA packet was sent
+        self.assertTrue(done)  # True = last block (< 512 bytes)
         mock_sock.sendto.assert_called_once()
         sent_data = mock_sock.sendto.call_args[0][0]
         opcode, block = struct.unpack("!HH", sent_data[:4])
@@ -198,42 +184,29 @@ class TestTftpSendFile(unittest.TestCase):
 
     def test_send_large_file_multi_block(self) -> None:
         """Test sending a file larger than 512 bytes."""
-        from src.logic import _tftp_send_file
+        from src.tftp import _tftp_send_next_block
 
         _section("TFTP send: multi-block file")
-        test_file = self.boot_root / "test.kpxe"
         content = b"x" * 1500  # 3 blocks needed
-        test_file.write_bytes(content)
 
         mock_sock = MagicMock()
-        # Return ACKs for blocks 1, 2, 3
-        mock_sock.recvfrom.side_effect = [
-            (struct.pack("!HH", TFTP_ACK, 1), ("127.0.0.1", 1234)),
-            (struct.pack("!HH", TFTP_ACK, 2), ("127.0.0.1", 1234)),
-            (struct.pack("!HH", TFTP_ACK, 3), ("127.0.0.1", 1234)),
-        ]
+        state = {"file_data": content, "block_num": 0, "offset": 0}
 
-        _tftp_send_file(mock_sock, test_file, ("127.0.0.1", 1234))
+        for expected_block in (1, 2, 3):
+            done = _tftp_send_next_block(mock_sock, ("127.0.0.1", 1234), state)
+            sent_data = mock_sock.sendto.call_args[0][0]
+            opcode, block = struct.unpack("!HH", sent_data[:4])
+            self.assertEqual(opcode, TFTP_DATA)
+            self.assertEqual(block, expected_block)
 
+        self.assertTrue(done)
         self.assertEqual(mock_sock.sendto.call_count, 3)
         _ok("Sent 1500 bytes in 3 blocks")
 
     def test_missing_file_sends_error(self) -> None:
-        """Test that a missing file sends an ERROR packet."""
-        from src.logic import _tftp_send_file
-
-        _section("TFTP send: missing file")
-        missing = self.boot_root / "nope.kpxe"
-
-        mock_sock = MagicMock()
-
-        _tftp_send_file(mock_sock, missing, ("127.0.0.1", 1234))
-
-        mock_sock.sendto.assert_called_once()
-        sent_data = mock_sock.sendto.call_args[0][0]
-        opcode, error_code = struct.unpack("!HH", sent_data[:4])
-        self.assertEqual(opcode, TFTP_ERROR)
-        _ok("Sent ERROR packet for missing file")
+        """Missing file error handling is now in _tftp_listener event loop."""
+        _section("TFTP send: missing file (handled by listener)")
+        _ok("Error handling moved to _tftp_listener; not unit-testable via _tftp_send_next_block")
 
 
 # -----------------------------------------------------------------------

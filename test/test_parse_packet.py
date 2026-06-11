@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.logic import parse_packet
+from src.proxydhcp import parse_packet
 
 
 def _section(title: str) -> None:
