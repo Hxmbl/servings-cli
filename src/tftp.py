@@ -1,4 +1,13 @@
-"""TFTP server — serves the bootstrap loader (undionly.kpxe / ipxe.efi) to PXE clients."""
+"""TFTP server — serves the bootstrap loader (undionly.kpxe / ipxe.efi) to PXE clients.
+
+This is the second stage of PXE boot:
+1. PC gets IP via DHCP (port 67/4011)
+2. DHCP tells PC to load "undionly.kpxe" via TFTP from our server
+3. PC sends TFTP RRQ → we stream the file back
+4. iPXE takes over and loads the real OS via HTTP (port 8080)
+
+TFTP is simple: client sends RRQ, we send DATA blocks, client ACKs each one.
+"""
 
 import selectors
 import socket
@@ -7,11 +16,11 @@ import threading
 from pathlib import Path
 
 
-TFTP_RRQ = 1
-TFTP_DATA = 3
-TFTP_ACK = 4
-TFTP_ERROR = 5
-TFTP_BLOCK_SIZE = 512
+TFTP_RRQ = 1          # Read Request — client asks for a file
+TFTP_DATA = 3         # Data block — server sends a chunk
+TFTP_ACK = 4          # Acknowledgment — client confirms receipt
+TFTP_ERROR = 5        # Error — something went wrong
+TFTP_BLOCK_SIZE = 512 # Standard TFTP block size (bytes per packet)
 
 ALLOWED_BOOT_FILES = frozenset({b"undionly.kpxe", b"ipxe.efi"})
 

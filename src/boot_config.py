@@ -1,4 +1,8 @@
-"""iPXE boot config generator — scans a directory and auto-generates boot.cfg."""
+"""iPXE boot config generator — scans a directory and auto-generates boot.cfg.
+
+boot.cfg is an iPXE script that shows a menu of available ISOs and kernels.
+iPXE loads this from the HTTP server (port 8080) after the TFTP stage.
+"""
 
 from pathlib import Path
 

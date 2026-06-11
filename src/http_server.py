@@ -1,10 +1,20 @@
-"""HTTP server — streams boot payloads (kernel, initrd, ISOs) to iPXE clients."""
+"""HTTP server — streams boot payloads (kernel, initrd, ISOs) to iPXE clients.
+
+This is the third stage of PXE boot:
+1. iPXE loads from TFTP (port 6969)
+2. iPXE fetches boot.cfg from this HTTP server (port 8080)
+3. boot.cfg tells iPXE which kernel/initrd/ISO to load
+4. iPXE loads the OS image via HTTP
+
+HTTP is used for heavy payloads — TFTP is too slow for kernels/ISOs.
+"""
 
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 
+# File extensions → MIME types — iPXE needs correct Content-Type to load files
 MIME_TYPES = {
     ".kernel": "application/octet-stream",
     ".bzImage": "application/octet-stream",
