@@ -1,10 +1,17 @@
 """Servings CLI - PXE/Boot server."""
 
+import sys
 from pathlib import Path
+
+# Ensure the project root is on sys.path so absolute package imports
+# (from src.xxx import yyy) work regardless of invocation method.
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 import typer
 
-from .server import serve as _serve
+from src.server import serve as _serve
 
 app = typer.Typer()
 
