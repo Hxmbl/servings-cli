@@ -3,6 +3,7 @@
 import selectors
 import socket
 import struct
+import threading
 from pathlib import Path
 
 
@@ -49,7 +50,7 @@ def _tftp_send_next_block(sock: socket.socket, addr: tuple[str, int], state: dic
     return len(chunk) < TFTP_BLOCK_SIZE
 
 
-def _tftp_listener(port: int, boot_dir: Path) -> None:
+def _tftp_listener(port: int, boot_dir: Path, shutdown: threading.Event) -> None:
     """UDP listener for TFTP Read Requests with support for concurrent transfers."""
     sel = selectors.DefaultSelector()
 
@@ -64,7 +65,7 @@ def _tftp_listener(port: int, boot_dir: Path) -> None:
     # Active transfers: client_addr -> {file_data: bytes, block_num: int, offset: int}
     transfers: dict[tuple[str, int], dict] = {}
 
-    while True:
+    while not shutdown.is_set():
         events = sel.select(timeout=1.0)
 
         for _key, _mask in events:

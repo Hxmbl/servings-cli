@@ -1,6 +1,6 @@
 """Thread orchestration — launches all three boot servers concurrently."""
 
-import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -22,7 +22,7 @@ def serve(
     All three must be running for a full PXE boot to succeed.
 
     Port notes:
-        - ProxyDHCP: 4011 is standard for ProxyDHCP (not 67/68 which need root)
+        - ProxyDHCP: 4011 is standard for ProxyDHCP (port 67 needs root)
         - TFTP: 6969 default because 69 needs root; use 69 on rooted devices
         - HTTP: 8080 is standard for alt HTTP; iPXE hits this for heavy payloads
     """
@@ -43,14 +43,16 @@ def serve(
     print(f"    Boot dir  : {root}")
     print()
 
+    shutdown = threading.Event()
     executor = ThreadPoolExecutor(max_workers=6)
-    executor.submit(_proxydhcp_listener, port)
-    executor.submit(_tftp_listener, tftp_port, root)
-    executor.submit(_http_server, http_port, root)
+    executor.submit(_proxydhcp_listener, port, shutdown)
+    executor.submit(_tftp_listener, tftp_port, root, shutdown)
+    executor.submit(_http_server, http_port, root, shutdown)
 
     try:
-        while True:
-            time.sleep(3600)
+        while not shutdown.is_set():
+            shutdown.wait(3600)
     except KeyboardInterrupt:
         print("\n[*] Shutting down...")
-        executor.shutdown(wait=False, cancel_futures=True)
+        shutdown.set()
+        executor.shutdown(wait=True)

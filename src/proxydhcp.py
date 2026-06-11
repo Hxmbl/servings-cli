@@ -2,6 +2,7 @@
 
 import socket
 import struct
+import threading
 
 
 def parse_packet(data: bytes, addr: tuple[str, int]) -> dict[str, object] | None:
@@ -69,20 +70,21 @@ def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> Non
 
     packet += b"\xff"  # End
 
-    target_address = (client_info["client_address"][0], 68)
+    target_address = (client_info["client_address"][0], client_info["client_address"][1])
     sock.sendto(packet, target_address)
     print(f"[+] Sent {len(packet)} bytes to {target_address}")
 
 
-def _proxydhcp_listener(port: int) -> None:
+def _proxydhcp_listener(port: int, shutdown: threading.Event) -> None:
     """UDP listener for ProxyDHCP requests."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         s.bind(("", port))
         s.settimeout(1.0)
         print(f"[*] ProxyDHCP listening on UDP {port}")
 
-        while True:
+        while not shutdown.is_set():
             try:
                 data, addr = s.recvfrom(2048)
             except socket.timeout:

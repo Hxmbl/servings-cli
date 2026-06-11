@@ -1,5 +1,6 @@
 """HTTP server — streams boot payloads (kernel, initrd, ISOs) to iPXE clients."""
 
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -58,9 +59,11 @@ class BootHTTPHandler(BaseHTTPRequestHandler):
         print(f"[+] HTTP {args[0]}")
 
 
-def _http_server(port: int, boot_root: Path) -> None:
+def _http_server(port: int, boot_root: Path, shutdown: threading.Event) -> None:
     """Start the HTTP file server."""
     BootHTTPHandler.boot_root = boot_root
     server = HTTPServer(("0.0.0.0", port), BootHTTPHandler)
+    server.timeout = 1.0
     print(f"[*] HTTP listening on TCP {port} (root: {boot_root})")
-    server.serve_forever()
+    while not shutdown.is_set():
+        server.handle_request()
