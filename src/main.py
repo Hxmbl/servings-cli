@@ -57,7 +57,7 @@ def serve(
     boot_dir: str = typer.Option(None, help="Directory containing boot files (default: auto-detect)"),
     root: bool = typer.Option(True, "--root/--no-root", help="Root mode: full DHCP + PXE (default: on)"),
     server_ip: str = typer.Option("192.168.42.129", help="Phone's IP on USB network"),
-    boot_file: str = typer.Option("ipxe.efi", help="Boot file to serve"),
+    boot_file: str = typer.Option("undionly.kpxe", help="Boot file to serve"),
 ) -> None:
     """Start PXE boot servers.
 

@@ -28,7 +28,7 @@ def serve(
     boot_dir: str = ".",
     root_mode: bool = True,
     server_ip: str = "192.168.42.129",
-    boot_file: str = "ipxe.efi",
+    boot_file: str = "undionly.kpxe",
 ) -> None:
     """Start all PXE boot servers concurrently.
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.proxydhcp import parse_packet
+from src.proxydhcp import parse_packet, _detect_boot_file
 
 
 def _section(title: str) -> None:
@@ -38,7 +38,7 @@ def _make_pxe_request() -> bytes:
 
 class TestParsePacket(unittest.TestCase):
     def test_valid_pxe_request(self) -> None:
-        _section("parse_packet: valid PXE request")
+        _section("parse_packet: valid PXE request (bare PXEClient)")
         data = _make_pxe_request()
         addr = ("127.0.0.1", 4011)
         info = parse_packet(data, addr)
@@ -46,7 +46,38 @@ class TestParsePacket(unittest.TestCase):
         self.assertEqual(info["client_address"], addr)
         self.assertEqual(info["transaction_id"], b"\x01\x02\x03\x04")
         self.assertEqual(info["mac_readable"], "aa:bb:cc:dd:ee:ff")
-        _ok("PXE request parsed correctly")
+        self.assertEqual(info["boot_file"], "undionly.kpxe")
+        _ok("PXE request parsed, default boot_file = undionly.kpxe")
+
+    def test_bios_pxe_request(self) -> None:
+        _section("parse_packet: BIOS PXE (Arch:0)")
+        pkt = bytearray(240)
+        pkt[0] = 1
+        pkt[4:8] = b"\x01\x02\x03\x04"
+        pkt[28:34] = b"\xaa\xbb\xcc\xdd\xee\xff"
+        pkt[236:240] = b"\x63\x82\x53\x63"
+        vendor = b"PXEClient:Arch:00000:UNDI:003000"
+        pkt += bytes([60, len(vendor)]) + vendor
+        pkt += bytes([255])
+        info = parse_packet(bytes(pkt), ("127.0.0.1", 4011))
+        self.assertIsNotNone(info)
+        self.assertEqual(info["boot_file"], "undionly.kpxe")
+        _ok("BIOS client → undionly.kpxe")
+
+    def test_efi_pxe_request(self) -> None:
+        _section("parse_packet: EFI PXE (Arch:7)")
+        pkt = bytearray(240)
+        pkt[0] = 1
+        pkt[4:8] = b"\x01\x02\x03\x04"
+        pkt[28:34] = b"\xaa\xbb\xcc\xdd\xee\xff"
+        pkt[236:240] = b"\x63\x82\x53\x63"
+        vendor = b"PXEClient:Arch:00007:UNDI:003000"
+        pkt += bytes([60, len(vendor)]) + vendor
+        pkt += bytes([255])
+        info = parse_packet(bytes(pkt), ("127.0.0.1", 4011))
+        self.assertIsNotNone(info)
+        self.assertEqual(info["boot_file"], "ipxe.efi")
+        _ok("EFI client → ipxe.efi")
 
     def test_short_packet_returns_none(self) -> None:
         _section("parse_packet: short packet")

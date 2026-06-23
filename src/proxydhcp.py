@@ -15,7 +15,8 @@ import threading
 def parse_packet(data: bytes, addr: tuple[str, int]) -> dict[str, object] | None:
     """Parse a DHCP/BOOTP packet and return PXE client info if valid.
 
-    Returns a dict with client_address, transaction_id, mac_raw, mac_readable.
+    Returns a dict with client_address, transaction_id, mac_raw, mac_readable,
+    boot_file (undionly.kpxe for BIOS, ipxe.efi for EFI).
     Returns None if the packet isn't a valid PXE request.
     """
     if len(data) < 240:
@@ -35,6 +36,7 @@ def parse_packet(data: bytes, addr: tuple[str, int]) -> dict[str, object] | None
     # Walk options looking for vendor class (option 60) containing "PXEClient"
     options_bytes = data[240:]
     cursor = 0
+    vendor_class = b""
 
     while cursor < len(options_bytes):
         tag = options_bytes[cursor]
@@ -45,18 +47,49 @@ def parse_packet(data: bytes, addr: tuple[str, int]) -> dict[str, object] | None
         length = options_bytes[cursor + 1]
         value = options_bytes[cursor + 2 : cursor + 2 + length]
 
-        if tag == 60 and b"PXEClient" in value:
-            print(f"[+] PXE request from {mac_readable} (TxID={transaction_id.hex()})")
-            return {
-                "client_address": addr,
-                "transaction_id": transaction_id,
-                "mac_raw": client_mac,
-                "mac_readable": mac_readable,
-            }
+        if tag == 60:
+            vendor_class = value
+            if b"PXEClient" in value:
+                break
 
         cursor += 2 + length
 
-    return None
+    if b"PXEClient" not in vendor_class:
+        return None
+
+    # Detect BIOS vs EFI from vendor class string: "PXEClient:Arch:XXXX:..."
+    # Arch 0 = BIOS, 6/7/8/9 = EFI variants
+    boot_file = _detect_boot_file(vendor_class)
+
+    print(f"[+] PXE request from {mac_readable} (TxID={transaction_id.hex()}) → {boot_file}")
+    return {
+        "client_address": addr,
+        "transaction_id": transaction_id,
+        "mac_raw": client_mac,
+        "mac_readable": mac_readable,
+        "boot_file": boot_file,
+    }
+
+
+def _detect_boot_file(vendor_class: bytes) -> str:
+    """Choose the right iPXE bootloader based on PXE client architecture.
+
+    The vendor class string contains "PXEClient:Arch:XXXX:..." where XXXX is
+    the architecture ID. 0x0000 = BIOS (undionly.kpxe), 6-9 = EFI (ipxe.efi).
+    """
+    try:
+        decoded = vendor_class.decode("ascii", errors="replace")
+        if "Arch:" in decoded:
+            arch_str = decoded.split("Arch:")[1].split(":")[0].split(",")[0].strip()
+            arch_id = int(arch_str, 16)
+            if arch_id == 0:
+                return "undionly.kpxe"
+            else:
+                return "ipxe.efi"
+    except (ValueError, IndexError):
+        pass
+    # Default: BIOS (safest fallback — undionly.kpxe chainloads iPXE for EFI too)
+    return "undionly.kpxe"
 
 
 def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> None:
@@ -89,7 +122,7 @@ def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> Non
     packet += b"\x36\x04" + socket.inet_aton(server_ip)  # option 54: server identifier
     packet += b"\x3c\x09PXEClient"     # option 60: vendor class (marks this as PXE)
     packet += b"\x42\x04" + socket.inet_aton(server_ip)  # option 66: TFTP server IP
-    boot_file = b"ipxe.efi\x00"
+    boot_file = (client_info["boot_file"] + "\x00").encode()
     packet += b"\x43" + bytes([len(boot_file)]) + boot_file  # option 67: boot file name
     packet += b"\xff"                   # end marker
 
