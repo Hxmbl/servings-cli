@@ -76,6 +76,16 @@ class TestParseTftpRRQ(unittest.TestCase):
         self.assertIsNone(result)
         _ok("Missing null returns None")
 
+    def test_apple_pxe_mac_path_prefix(self) -> None:
+        _section("parse_tftp_rrq: Apple PXE MAC prefix")
+        data = _make_rrq("/01-aa-bb-cc-dd-ee-ff/ipxe.efi")
+        result = parse_tftp_rrq(data)
+        self.assertEqual(result, "/01-aa-bb-cc-dd-ee-ff/ipxe.efi")
+        # The listener strips to basename via Path().name
+        from pathlib import Path
+        self.assertEqual(Path(result).name, "ipxe.efi")
+        _ok("Apple PXE path parsed, basename extraction works")
+
 
 # -----------------------------------------------------------------------
 # HTTP Handler Tests

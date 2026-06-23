@@ -62,10 +62,13 @@ def parse_packet(data: bytes, addr: tuple[str, int]) -> dict[str, object] | None
 def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> None:
     """Build and send a ProxyDHCP reply with boot file info.
 
-    Only sends the PXE options (60, 67) — the IP was already assigned
+    Only sends the PXE options (54, 60, 66, 67) — the IP was already assigned
     by Android's DHCP server. This is ProxyDHCP, not full DHCP.
     """
     print(f"[*] Replying to {client_info['mac_readable']}...")
+
+    # TFTP server IP — the phone's IP on the client's network
+    server_ip = client_info["client_address"][0]
 
     packet = bytearray(240)
 
@@ -83,8 +86,10 @@ def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> Non
 
     # DHCP options — what the PXE client needs to find the boot file
     packet += b"\x35\x01\x05"          # option 53: DHCPACK
+    packet += b"\x36\x04" + socket.inet_aton(server_ip)  # option 54: server identifier
     packet += b"\x3c\x09PXEClient"     # option 60: vendor class (marks this as PXE)
-    boot_file = b"undionly.kpxe\x00"
+    packet += b"\x42\x04" + socket.inet_aton(server_ip)  # option 66: TFTP server IP
+    boot_file = b"ipxe.efi\x00"
     packet += b"\x43" + bytes([len(boot_file)]) + boot_file  # option 67: boot file name
     packet += b"\xff"                   # end marker
 

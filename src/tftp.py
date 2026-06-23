@@ -22,7 +22,10 @@ TFTP_ACK = 4          # Acknowledgment — client confirms receipt
 TFTP_ERROR = 5        # Error — something went wrong
 TFTP_BLOCK_SIZE = 512 # Standard TFTP block size (bytes per packet)
 
-ALLOWED_BOOT_FILES = frozenset({b"undionly.kpxe", b"ipxe.efi"})
+ALLOWED_BOOT_FILES = frozenset({
+    b"undionly.kpxe", b"ipxe.efi", b"snponly.efi", b"snp.efi",
+    b"ipxe.efi.signed", b"bootx64.efi", b"grubx64.efi",
+})
 
 
 def parse_tftp_rrq(data: bytes) -> str | None:
@@ -105,21 +108,23 @@ def _tftp_listener(port: int, boot_dir: Path, shutdown: threading.Event) -> None
                     if not filename:
                         continue
 
-                    filename_bytes = filename.encode("ascii")
-                    if filename_bytes not in ALLOWED_BOOT_FILES:
+                    # Apple PXE prepends /01-XX-XX-XX-XX-XX-XX/ — strip to basename
+                    bare_name = Path(filename).name
+                    bare_bytes = bare_name.encode("ascii")
+                    if bare_bytes not in ALLOWED_BOOT_FILES:
                         print(f"[!] TFTP: rejecting unknown file '{filename}' from {addr}")
                         error_pkt = struct.pack("!HH", TFTP_ERROR, 2) + b"Access denied\x00"
                         sock.sendto(error_pkt, addr)
                         continue
 
-                    file_path = boot_dir / filename
+                    file_path = boot_dir / bare_name
                     if not file_path.exists():
-                        print(f"[!] TFTP: {filename} not found at {file_path}")
+                        print(f"[!] TFTP: {bare_name} not found at {file_path}")
                         error_pkt = struct.pack("!HH", TFTP_ERROR, 1) + b"File not found\x00"
                         sock.sendto(error_pkt, addr)
                         continue
 
-                    print(f"[+] TFTP: serving {filename} to {addr}")
+                    print(f"[+] TFTP: serving {bare_name} to {addr} (requested: {filename})")
                     try:
                         file_data = file_path.read_bytes()
                     except OSError as e:
