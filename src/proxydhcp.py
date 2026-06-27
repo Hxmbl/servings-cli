@@ -1,10 +1,9 @@
 """ProxyDHCP server — intercepts PXE client requests and directs them to the bootloader.
 
-Non-root mode (port 4011): only responds to PXE clients after Android's DHCP assigns an IP.
-Root mode (port 67): full DHCP server that replaces Android's dnsmasq entirely.
+Non-root mode (port 4011): works alongside an existing DHCP server (e.g. your router).
+Only responds to PXE clients after the network's DHCP assigns an IP.
 
-The non-root path is limited — Android's DHCP doesn't advertise PXE options,
-so the PC never contacts port 4011. Root mode is required for USB tethering PXE.
+Root mode (port 67): replaces the existing DHCP server entirely (see dhcp_server.py).
 """
 
 import socket
@@ -136,9 +135,8 @@ def send_proxy_reply(sock: socket.socket, client_info: dict[str, object]) -> Non
 def _proxydhcp_listener(port: int, shutdown: threading.Event) -> None:
     """UDP listener for ProxyDHCP requests on non-root (port 4011).
 
-    Limitation: Android's DHCP answers first and doesn't include PXE options,
-    so the PC never contacts this port. Root mode (port 67) is needed for
-    USB tethering PXE boot.
+    Works alongside an existing DHCP server. The ProxyDHCP only adds PXE
+    options after the client gets an IP from the network's DHCP.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "servings"
+name = "servings-cli"
 version = "0.1.0"
-description = "Run a PXE/Boot server directly from your phone. No need for a USB."
+description = "Portable PXE/Boot server — runs on anything with Python 3.12+"
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.12",
 ]
 
 [project.scripts]
-servings = "src.main:app"
+servings-cli = "src.main:entry_point"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

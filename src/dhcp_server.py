@@ -1,11 +1,10 @@
-"""Full DHCP server — replaces Android's built-in DHCP when running as root.
+"""Full DHCP server — required for seamless PXE boot.
 
-Required for PXE boot over USB tethering. Android's DHCP server doesn't include
-PXE options (60/66/67), so the PC never discovers the boot server.
+Root mode: replaces the network's DHCP server on port 67, providing
+both IP assignment and PXE options (60/66/67) so clients auto-discover
+the boot server.
 
-Usage: kill Android's dnsmasq, then run this on port 67.
-  su -c killall dnsmasq
-  python src/main.py --root
+Non-root mode is handled by proxydhcp.py on port 4011 instead.
 """
 
 import socket
@@ -148,10 +147,10 @@ def _build_bootp_packet(
     opts += bytes([OPT_ROUTER, 4]) + socket.inet_aton(server_ip)
     opts += bytes([OPT_DNS, 4]) + socket.inet_aton(server_ip)
     opts += bytes([OPT_BROADCAST, 4]) + socket.inet_aton(f"{subnet}.255")
-    opts += bytes([OPT_DOMAIN, 9]) + b"local\x00"
+    opts += bytes([OPT_DOMAIN, 6]) + b"local\x00"
 
     # PXE-specific options — client uses these to find TFTP server + boot file
-    opts += bytes([OPT_VENDOR_CLASS, 8]) + b"PXEClient"
+    opts += bytes([OPT_VENDOR_CLASS, 9]) + b"PXEClient"
     opts += bytes([OPT_TFTP_SERVER, 4]) + socket.inet_aton(server_ip)
     opts += bytes([OPT_BOOT_FILE, len(boot_file) + 1]) + boot_file.encode() + b"\x00"
 
@@ -168,9 +167,9 @@ def dhcp_listener(
 ) -> None:
     """Full DHCP server — listens on port 67, assigns IPs, serves PXE options.
 
-    This replaces Android's dnsmasq for USB tethering. The PC broadcasts
-    DHCPDISCOVER, we respond with an IP + PXE options, the PC then contacts
-    our TFTP server to load the bootloader.
+    Replaces the network's DHCP server. The PC broadcasts DHCPDISCOVER,
+    we respond with an IP + PXE options, the PC then contacts our TFTP
+    server to load the bootloader.
 
     Flow: DISCOVER → OFFER → REQUEST → ACK → PC boots via TFTP
     """

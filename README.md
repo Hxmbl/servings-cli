@@ -1,72 +1,173 @@
-# servings
+# servings-cli
 
-Run a full PXE/Boot server directly from your phone. No need for a USB.
+Portable PXE/Boot server — runs on any OS with Python 3.12+.
 
-Serves three protocols to chainload any x86_64 machine over USB tether or Wi-Fi:
+Serves three protocols to chainload any x86_64 machine over a local network:
 
-1. **ProxyDHCP** (UDP 4011) -- intercepts PXE clients and directs them to your phone
-2. **TFTP** (UDP 6969) -- serves the initial bootstrap loader (`undionly.kpxe` / `ipxe.efi`)
-3. **HTTP** (TCP 8080) -- streams kernels, initrd, squashfs, and ISO files at full link speed
+1. **DHCP** (UDP 67) — assigns IP addresses and directs PXE clients to your server (root mode)
+2. **ProxyDHCP** (UDP 4011) — adds PXE options alongside an existing DHCP server (non-root mode)
+3. **TFTP** (UDP 69/6969) — serves the initial bootstrap loader (`undionly.kpxe` / `ipxe.efi`)
+4. **HTTP** (TCP 8080) — streams kernels, initrd, squashfs, and ISO files at full link speed
 
-An iPXE `boot.cfg` menu is auto-generated from whatever ISOs / kernels you drop in the boot directory.
+An iPXE `boot.cfg` menu is auto-generated from whatever ISOs and kernels you drop in the boot directory.
+
+---
 
 ## Install
 
 ```bash
+git clone <repo>
+cd servings-termux
 pip install -e .
 ```
 
-Requires Python 3.12+ and Termux on Android.
+Requires Python 3.12+.
 
-## Setup (Termux)
+---
+
+## Quick start
 
 ```bash
-# Allow Termux access to shared storage
-termux-setup-storage
+# Root mode (default) — full DHCP + PXE, needs sudo:
+sudo servings-cli serve --server-ip 192.168.1.100
 
-# Place your disk images somewhere in shared storage
-mkdir -p /sdcard/Disk Images/
-cp archlinux-*.iso /sdcard/Disk Images/
+# Non-root mode — ProxyDHCP alongside your router's DHCP:
+servings-cli serve --no-root
 
-# Drop a PXE bootloader in the same directory
-# (download from http://boot.ipxe.org/undionly.kpxe)
+# Android/Termux with USB tethering:
+servings-cli serve --android
 ```
+
+---
 
 ## Usage
 
-```bash
-# Auto-detect Termux storage, start all three servers
-servings serve
+### Root mode (default)
 
-# Custom ports and explicit boot directory
-servings serve \
-  --port 4011 \
-  --tftp-port 6969 \
-  --http-port 8080 \
-  --boot-dir /sdcard/Disk Images/
+Full DHCP server. Replaces your network's existing DHCP server entirely,
+handling both IP address assignment and PXE boot advertisement. Gives the
+most seamless PXE experience — the client machine auto-discovers the boot
+server without any manual configuration.
+
+```bash
+sudo servings-cli serve --server-ip 192.168.1.100
 ```
 
-On rooted devices, set `--tftp-port 69` to use the standard TFTP port.
+Ports: DHCP on 67, TFTP on 69, HTTP on 8080.
+
+### Non-root mode
+
+ProxyDHCP works alongside your existing DHCP server (e.g. your home router).
+Your router assigns IP addresses, and servings-cli adds the PXE boot options
+that tell the client where to find the bootloader.
+
+```bash
+servings-cli serve --no-root
+```
+
+Ports: ProxyDHCP on 4011, TFTP on 6969, HTTP on 8080.
+
+### Android / Termux
+
+The `--android` flag adds Termux-specific conveniences on top of whatever
+mode you're running in:
+
+- Scans `/sdcard/Disk Images` and `/storage/emulated/0/Disk Images` for boot files
+- Auto-detects the USB tethering interface IP (rndis0/usb0)
+- Shows platform info in the server banner
+
+```bash
+# Non-root on Termux (no root needed):
+servings-cli serve --android --no-root
+
+# Root mode on Termux (kill dnsmasq first):
+su -c killall dnsmasq
+servings-cli serve --android
+
+# Set up shared storage for boot files:
+termux-setup-storage
+mkdir -p /sdcard/Disk\ Images
+cp archlinux-*.iso /sdcard/Disk\ Images/
+curl -o /sdcard/Disk\ Images/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
+```
+
+---
+
+## Port reference
+
+| Mode | DHCP | TFTP | HTTP | Privileges |
+|------|------|------|------|------------|
+| **Root** (default) | Full DHCP on 67 | 69 | 8080 | sudo/admin |
+| **Non-root** (`--no-root`) | ProxyDHCP on 4011 | 6969 | 8080 | None |
+
+---
+
+## Boot directory
+
+The server looks for boot files in these locations (in order):
+
+1. `--boot-dir PATH` if explicitly provided
+2. `~/servings-boot/`
+3. `~/tftp/`
+4. `/srv/tftp/`
+5. `/var/lib/tftpboot/`
+6. Current working directory (fallback)
+7. With `--android`: `/sdcard/Disk Images/` and `/storage/emulated/0/Disk Images/`
+
+### What goes in it
+
+- `.iso` files — booted directly via `sanboot`
+- `vmlinuz-*` + `initramfs-*.img` pairs — kernel + initrd direct boot
+- `undionly.kpxe` / `ipxe.efi` — PXE bootstrap loader (download from https://boot.ipxe.org)
+
+The server generates `boot.cfg` (an iPXE menu script) on every start. Delete it to force a fresh scan.
+
+---
 
 ## How it works
 
-1. Phone runs a ProxyDHCP server on the local network (USB tethering or Wi-Fi)
-2. Client machine sends a DHCP discover with option 60 (PXEClient)
-3. Server detects the PXE client and replies with the boot filename (`undionly.kpxe`)
-4. Client requests the file over TFTP; the phone streams it in 512-byte blocks
-5. iPXE boots in the client's RAM and requests `boot.cfg` over HTTP from the phone
-6. The auto-generated menu lists every ISO and kernel+initrd pair found in the boot dir
-7. User picks an entry; iPXE either `sanboot`s the ISO directly or loads the kernel+initrd
+1. Client machine PXE-boots and broadcasts a DHCP discover with option 60 (PXEClient).
+2. **Root mode**: servings-cli assigns an IP and responds with PXE boot options.
+   **Non-root mode**: your router assigns the IP, then servings-cli responds to the
+   PXE-specific request on port 4011.
+3. The client loads the bootstrap (`undionly.kpxe` / `ipxe.efi`) via TFTP.
+4. iPXE takes over in the client's RAM and requests `boot.cfg` over HTTP.
+5. The auto-generated menu lists every ISO and kernel+initrd pair found in the boot dir.
+6. User picks an entry; iPXE either `sanboot`s the ISO directly or loads the kernel+initrd.
 
-## Boot directory auto-detection
+---
 
-If no `--boot-dir` is specified, the server checks these paths in order:
+## Platform notes
 
-- `/sdcard/Disk Images/`
-- `/storage/emulated/0/Disk Images/`
-- Current working directory (fallback)
+### Linux
+```bash
+sudo servings-cli serve --server-ip 192.168.1.100
+```
+Root mode works with `sudo`. Ports < 1024 require root privileges.
+Without root, use `--no-root`.
 
-Place `.iso` files for direct ISO boot, or `vmlinuz-*` + `initramfs-*.img` pairs for kernel+initrd boot. The server generates an iPXE menu script (`boot.cfg`) on every start.
+### macOS
+```bash
+sudo servings-cli serve --server-ip 192.168.2.1
+```
+Same as Linux — `sudo` for root mode, `--no-root` otherwise.
+USB tethering on macOS typically uses `192.168.2.1` (check System Settings → Sharing).
+
+### Windows
+```bash
+# Run as Administrator, then:
+servings-cli serve --server-ip 192.168.137.1
+```
+Run PowerShell or Command Prompt as Administrator for root mode.
+Windows USB tethering typically uses `192.168.137.1`.
+
+### Android (Termux)
+```bash
+servings-cli serve --android
+```
+Non-root works on any device. Root mode requires a rooted device.
+
+---
 
 ## Tests
 
@@ -74,12 +175,26 @@ Place `.iso` files for direct ISO boot, or `vmlinuz-*` + `initramfs-*.img` pairs
 python3 -m unittest discover -s test -v
 ```
 
-## Notes
+---
 
-- ProxyDHCP on port 4011 avoids the need for root (standard DHCP uses 67/68)
-- TFTP defaults to port 6969 because port 69 requires root on Android
-- The auto-generated `boot.cfg` is not versioned -- delete it to force a fresh scan
-- Will be recoded in Rust someday
+## CLI reference
+
+```
+servings-cli serve [OPTIONS]
+
+Options:
+  --port INTEGER       DHCP/ProxyDHCP UDP port (only used with --no-root)
+  --tftp-port INTEGER  TFTP UDP port (only used with --no-root)
+  --http-port INTEGER  HTTP TCP port for iPXE payloads
+  --boot-dir TEXT      Directory containing boot files (default: auto-detect)
+  --no-root            Non-root mode: ProxyDHCP on 4011 + TFTP on 6969
+  --server-ip TEXT     Server IP on the client network
+  --boot-file TEXT     Boot file to serve
+  --android            Android/Termux mode
+  --help               Show this message and exit
+```
+
+---
 
 ## License
 

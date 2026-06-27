@@ -1,16 +1,10 @@
 """Thread orchestration — launches all PXE boot servers concurrently.
 
-Root mode: full DHCP server on port 67, replaces Android's dnsmasq (default).
-Non-root mode: ProxyDHCP on port 4011, limited (Android's DHCP doesn't advertise PXE).
-
-Root mode setup:
-  su -c killall dnsmasq
-  servings serve
-
-Non-root (limited):
-  servings serve --no-root
+Root mode (default): full DHCP on 67 + TFTP on 69 (needs sudo/admin).
+Non-root mode: ProxyDHCP on 4011 + TFTP on 6969 (no privileges needed).
 """
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,25 +15,29 @@ from src.http_server import _http_server
 from src.boot_config import generate_boot_config
 
 
+def _check_root() -> None:
+    """Warn the user if they're trying root mode without privileges."""
+    if os.name == "nt":
+        return
+    try:
+        if os.geteuid() != 0:
+            print("[!] Root mode requires root/admin privileges (bind to port 67/69).")
+            print("    Run with sudo or use --no-root for non-root mode.")
+            print()
+    except AttributeError:
+        pass
+
+
 def serve(
-    port: int = 67,
-    tftp_port: int = 69,
+    port: int = 4011,
+    tftp_port: int = 6969,
     http_port: int = 8080,
     boot_dir: str = ".",
     root_mode: bool = True,
     server_ip: str = "192.168.42.129",
     boot_file: str = "undionly.kpxe",
+    android: bool = False,
 ) -> None:
-    """Start all PXE boot servers concurrently.
-
-    Root mode (default): uses port 67 for full DHCP (needs su to bind).
-    Non-root mode: uses port 4011 for ProxyDHCP (limited without root).
-
-    Port notes:
-        - DHCP: 67 (root) or 4011 (non-root)
-        - TFTP: 69 (root) or 6969 (non-root)
-        - HTTP: 8080 is standard for alt HTTP; iPXE hits this for heavy payloads
-    """
     root = Path(boot_dir).resolve()
     if not root.exists():
         print(f"[!] Boot directory does not exist: {root}")
@@ -50,40 +48,41 @@ def serve(
     except OSError as e:
         print(f"[!] Could not generate boot.cfg: {e}")
 
-    # Determine which ports to use based on root mode
+    if root_mode:
+        _check_root()
+
     dhcp_port = 67 if root_mode else port
     tftp_actual = 69 if root_mode else tftp_port
 
     print()
     print("=" * 55)
-    print("  Servings PXE Boot Server")
+    print("  servings-cli PXE Boot Server")
     print("=" * 55)
-    if root_mode:
-        print("  MODE      : ROOT — full DHCP server on port 67")
-        print("  WARNING   : Kill Android's dnsmasq first:")
-        print("              su -c killall dnsmasq")
-    else:
-        print("  MODE      : non-root — ProxyDHCP only (limited)")
-        print("  WARNING   : Android's DHCP doesn't advertise PXE options.")
-        print("              The PC may not discover this server.")
+    mode_label = "ROOT" if root_mode else "non-root"
+    print(f"  MODE      : {mode_label}")
     print(f"  DHCP      : UDP {dhcp_port}")
     print(f"  TFTP      : UDP {tftp_actual}")
     print(f"  HTTP      : TCP {http_port}")
     print(f"  Boot dir  : {root}")
     print(f"  Boot file : {boot_file}")
     print(f"  Server IP : {server_ip}")
+    if android:
+        print(f"  Platform  : Android/Termux")
     print("=" * 55)
     print()
+
+    if android and root_mode:
+        print("[*] Android root mode: kill dnsmasq first:")
+        print("    su -c killall dnsmasq")
+        print()
 
     shutdown = threading.Event()
     executor = ThreadPoolExecutor(max_workers=6)
 
     if root_mode:
-        # Root mode: full DHCP server handles both IP assignment and PXE
         from src.dhcp_server import dhcp_listener
         executor.submit(dhcp_listener, dhcp_port, boot_file, shutdown, server_ip)
     else:
-        # Non-root: ProxyDHCP only — Android's DHCP handles IP assignment
         executor.submit(_proxydhcp_listener, dhcp_port, shutdown)
 
     executor.submit(_tftp_listener, tftp_actual, root, shutdown)

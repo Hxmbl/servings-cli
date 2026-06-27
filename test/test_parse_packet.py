@@ -115,6 +115,112 @@ class TestParsePacket(unittest.TestCase):
         _ok("Non-PXE vendor class returns None")
 
 
+
+# -----------------------------------------------------------------------
+# _detect_boot_file edge cases
+# -----------------------------------------------------------------------
+
+class TestDetectBootFile(unittest.TestCase):
+    def test_bios_arch_0(self) -> None:
+        _section("_detect_boot_file: BIOS (Arch:0)")
+        result = _detect_boot_file(b"PXEClient:Arch:00000:UNDI:003000")
+        self.assertEqual(result, "undionly.kpxe")
+        _ok("Arch 0 → undionly.kpxe")
+
+    def test_efi_arch_6(self) -> None:
+        _section("_detect_boot_file: EFI (Arch:6)")
+        result = _detect_boot_file(b"PXEClient:Arch:00006:UNDI:003000")
+        self.assertEqual(result, "ipxe.efi")
+        _ok("Arch 6 → ipxe.efi")
+
+    def test_efi_arch_7(self) -> None:
+        _section("_detect_boot_file: EFI (Arch:7)")
+        result = _detect_boot_file(b"PXEClient:Arch:00007:UNDI:003000")
+        self.assertEqual(result, "ipxe.efi")
+        _ok("Arch 7 → ipxe.efi")
+
+    def test_efi_arch_9(self) -> None:
+        _section("_detect_boot_file: EFI (Arch:9)")
+        result = _detect_boot_file(b"PXEClient:Arch:00009:UNDI:003000")
+        self.assertEqual(result, "ipxe.efi")
+        _ok("Arch 9 → ipxe.efi")
+
+    def test_bare_pxeclient(self) -> None:
+        _section("_detect_boot_file: bare PXEClient")
+        result = _detect_boot_file(b"PXEClient")
+        self.assertEqual(result, "undionly.kpxe")
+        _ok("Bare PXEClient → undionly.kpxe (safe default)")
+
+    def test_malformed_vendor_class(self) -> None:
+        _section("_detect_boot_file: malformed")
+        result = _detect_boot_file(b"garbage\xff\xfe")
+        self.assertEqual(result, "undionly.kpxe")
+        _ok("Malformed vendor class → undionly.kpxe")
+
+    def test_empty_vendor_class(self) -> None:
+        _section("_detect_boot_file: empty")
+        result = _detect_boot_file(b"")
+        self.assertEqual(result, "undionly.kpxe")
+        _ok("Empty vendor class → undionly.kpxe")
+
+    def test_arch_without_colon(self) -> None:
+        _section("_detect_boot_file: Arch without colon")
+        result = _detect_boot_file(b"PXEClient:Arch")
+        self.assertEqual(result, "undionly.kpxe")
+        _ok("Incomplete Arch field → undionly.kpxe")
+
+
+# -----------------------------------------------------------------------
+# send_proxy_reply unit tests
+# -----------------------------------------------------------------------
+
+class TestSendProxyReply(unittest.TestCase):
+    def test_sends_proxy_reply(self) -> None:
+        _section("send_proxy_reply: builds and sends packet")
+        from src.proxydhcp import send_proxy_reply
+
+        mock_sock = unittest.mock.MagicMock()
+        client_info = {
+            "client_address": ("10.0.0.50", 4011),
+            "transaction_id": b"\x01\x02\x03\x04",
+            "mac_raw": b"\xaa\xbb\xcc\xdd\xee\xff",
+            "mac_readable": "aa:bb:cc:dd:ee:ff",
+            "boot_file": "undionly.kpxe",
+        }
+
+        send_proxy_reply(mock_sock, client_info)
+
+        mock_sock.sendto.assert_called_once()
+        sent_data, target = mock_sock.sendto.call_args[0]
+        self.assertEqual(target, ("10.0.0.50", 4011))
+        self.assertEqual(sent_data[0], 2)
+        self.assertEqual(sent_data[4:8], b"\x01\x02\x03\x04")
+        self.assertEqual(sent_data[28:34], b"\xaa\xbb\xcc\xdd\xee\xff")
+        self.assertEqual(sent_data[236:240], b"\x63\x82\x53\x63")
+        self.assertIn(b"undionly.kpxe", sent_data)
+        self.assertIn(b"PXEClient", sent_data)
+        _ok("Proxy reply packet correctly built and sent")
+
+    def test_sends_ipxe_efi_boot_file(self) -> None:
+        _section("send_proxy_reply: ipxe.efi boot file")
+        from src.proxydhcp import send_proxy_reply
+
+        mock_sock = unittest.mock.MagicMock()
+        client_info = {
+            "client_address": ("10.0.0.50", 4011),
+            "transaction_id": b"\x01\x02\x03\x04",
+            "mac_raw": b"\xaa\xbb\xcc\xdd\xee\xff",
+            "mac_readable": "aa:bb:cc:dd:ee:ff",
+            "boot_file": "ipxe.efi",
+        }
+
+        send_proxy_reply(mock_sock, client_info)
+
+        sent_data = mock_sock.sendto.call_args[0][0]
+        self.assertIn(b"ipxe.efi", sent_data)
+        _ok("Proxy reply contains ipxe.efi")
+
+
 if __name__ == "__main__":
     print()
     print(f"  {'#' * 62}")
